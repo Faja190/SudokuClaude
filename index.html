@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Sudoku</title>
+<style>
+  body {
+    font-family: sans-serif;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    background: #f4f4f4;
+    padding: 20px;
+  }
+
+  h1 { margin-bottom: 10px; }
+
+  #board {
+    display: grid;
+    grid-template-columns: repeat(9, 50px);
+    grid-template-rows: repeat(9, 50px);
+    border: 3px solid #222;
+    background: #222;
+    gap: 1px;
+  }
+
+  .cell {
+    background: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 22px;
+    cursor: pointer;
+    user-select: none;
+  }
+
+  /* thicker borders every 3rd row/column to mark the 3x3 boxes */
+  .cell.box-right { border-right: 3px solid #222; }
+  .cell.box-bottom { border-bottom: 3px solid #222; }
+
+  .cell.given {
+    font-weight: bold;
+    color: #000;
+    cursor: default;
+  }
+
+  .cell.selected {
+    background: #cde8ff;
+  }
+
+  .cell.conflict {
+    background: #ffb3b3;
+    color: #a00;
+  }
+
+  #controls {
+    margin-top: 16px;
+  }
+
+  button {
+    font-size: 14px;
+    padding: 6px 12px;
+    cursor: pointer;
+  }
+
+  #message {
+    margin-top: 10px;
+    font-weight: bold;
+    color: #2a7a2a;
+    min-height: 20px;
+  }
+</style>
+</head>
+<body>
+
+<h1>Sudoku</h1>
+<div id="board"></div>
+<div id="controls">
+  <button id="new-game">New Game</button>
+</div>
+<div id="message"></div>
+
+<script>
+  // ---- Grid state ----
+  // board: 9x9 array of numbers, 0 = empty
+  // givens: 9x9 array of booleans, true = pre-filled/locked cell
+  let board = [];
+  let givens = [];
+  let selectedRow = null;
+  let selectedCol = null;
+
+  // ---- Core sudoku helpers ----
+
+  function isSafe(grid, row, col, num) {
+    for (let i = 0; i < 9; i++) {
+      if (grid[row][i] === num) return false;
+      if (grid[i][col] === num) return false;
+    }
+    const boxRow = Math.floor(row / 3) * 3;
+    const boxCol = Math.floor(col / 3) * 3;
+    for (let r = 0; r < 3; r++) {
+      for (let c = 0; c < 3; c++) {
+        if (grid[boxRow + r][boxCol + c] === num) return false;
+      }
+    }
+    return true;
+  }
+
+  function shuffledDigits() {
+    const digits = [1, 2, 3, 4, 5, 6, 7, 8, 9];
+    for (let i = digits.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [digits[i], digits[j]] = [digits[j], digits[i]];
+    }
+    return digits;
+  }
+
+  // Fills an empty 9x9 grid completely using randomized backtracking.
+  function fillGrid(grid) {
+    for (let row = 0; row < 9; row++) {
+      for (let col = 0; col < 9; col++) {
+        if (grid[row][col] === 0) {
+          for (const num of shuffledDigits()) {
+            if (isSafe(grid, row, col, num)) {
+              grid[row][col] = num;
+              if (fillGrid(grid)) return true;
+              grid[row][col] = 0;
+            }
+          }
+          return false; // no digit works here, backtrack
+        }
+      }
+    }
+    return true; // no empty cells left
+  }
+
+  // Counts solutions of a grid, stopping early once it finds `limit` of them.
+  // Used to confirm a puzzle still has exactly one solution after removing a cell.
+  function countSolutions(grid, limit) {
+    for (let row = 0; row < 9; row++) {
+      for (let col = 0; col < 9; col++) {
+        if (grid[row][col] === 0) {
+          let count = 0;
+          for (let num = 1; num <= 9; num++) {
+            if (isSafe(grid, row, col, num)) {
+              grid[row][col] = num;
+              count += countSolutions(grid, limit - count);
+              grid[row][col] = 0;
+              if (count >= limit) return count;
+            }
+          }
+          return count;
+        }
+      }
+    }
+    return 1; // fully filled = one solution found
+  }
+
+  // Builds a full solved board, then removes cells one at a time as long as
+  // the puzzle still has exactly one solution, to reach the target number of givens.
+  function generatePuzzle(targetGivens) {
+    const solved = [];
+    for (let i = 0; i < 9; i++) solved.push(new Array(9).fill(0));
+    fillGrid(solved);
+
+    const puzzle = solved.map(row => row.slice());
+
+    const cells = [];
+    for (let r = 0; r < 9; r++) {
+      for (let c = 0; c < 9; c++) cells.push([r, c]);
+    }
+    for (let i = cells.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [cells[i], cells[j]] = [cells[j], cells[i]];
+    }
+
+    let filledCount = 81;
+    for (const [r, c] of cells) {
+      if (filledCount <= targetGivens) break;
+      const backup = puzzle[r][c];
+      puzzle[r][c] = 0;
+      const copy = puzzle.map(row => row.slice());
+      if (countSolutions(copy, 2) === 1) {
+        filledCount--;
+      } else {
+        puzzle[r][c] = backup;
+      }
+    }
+
+    return puzzle;
+  }
+
+  // ---- Game setup ----
+
+  function newGame() {
+    board = generatePuzzle(32);
+    givens = board.map(row => row.map(val => val !== 0));
+    selectedRow = null;
+    selectedCol = null;
+    document.getElementById('message').textContent = '';
+    render();
+  }
+
+  // ---- Conflict detection ----
+
+  function hasConflict(row, col) {
+    const num = board[row][col];
+    if (num === 0) return false;
+
+    for (let i = 0; i < 9; i++) {
+      if (i !== col && board[row][i] === num) return true;
+      if (i !== row && board[i][col] === num) return true;
+    }
+    const boxRow = Math.floor(row / 3) * 3;
+    const boxCol = Math.floor(col / 3) * 3;
+    for (let r = 0; r < 3; r++) {
+      for (let c = 0; c < 3; c++) {
+        const rr = boxRow + r, cc = boxCol + c;
+        if ((rr !== row || cc !== col) && board[rr][cc] === num) return true;
+      }
+    }
+    return false;
+  }
+
+  function isBoardComplete() {
+    for (let r = 0; r < 9; r++) {
+      for (let c = 0; c < 9; c++) {
+        if (board[r][c] === 0 || hasConflict(r, c)) return false;
+      }
+    }
+    return true;
+  }
+
+  // ---- Rendering ----
+
+  function render() {
+    const boardEl = document.getElementById('board');
+    boardEl.innerHTML = '';
+
+    for (let row = 0; row < 9; row++) {
+      for (let col = 0; col < 9; col++) {
+        const cellEl = document.createElement('div');
+        cellEl.className = 'cell';
+        if (col === 2 || col === 5) cellEl.classList.add('box-right');
+        if (row === 2 || row === 5) cellEl.classList.add('box-bottom');
+        if (givens[row][col]) cellEl.classList.add('given');
+        if (row === selectedRow && col === selectedCol) cellEl.classList.add('selected');
+        if (hasConflict(row, col)) cellEl.classList.add('conflict');
+
+        const val = board[row][col];
+        cellEl.textContent = val === 0 ? '' : val;
+
+        cellEl.addEventListener('click', () => {
+          if (givens[row][col]) return;
+          selectedRow = row;
+          selectedCol = col;
+          render();
+        });
+
+        boardEl.appendChild(cellEl);
+      }
+    }
+
+    const message = document.getElementById('message');
+    if (isBoardComplete()) {
+      message.textContent = 'Solved! 🎉';
+    } else {
+      message.textContent = '';
+    }
+  }
+
+  // ---- Input handling ----
+
+  document.addEventListener('keydown', (e) => {
+    if (selectedRow === null || selectedCol === null) return;
+    if (givens[selectedRow][selectedCol]) return;
+
+    if (e.key >= '1' && e.key <= '9') {
+      board[selectedRow][selectedCol] = parseInt(e.key, 10);
+      render();
+    } else if (e.key === 'Backspace' || e.key === 'Delete' || e.key === '0') {
+      board[selectedRow][selectedCol] = 0;
+      render();
+    }
+  });
+
+  document.getElementById('new-game').addEventListener('click', newGame);
+
+  newGame();
+</script>
+
+</body>
+</html>
